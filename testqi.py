@@ -66,6 +66,44 @@ def map_macho_binary(mu: Uc, binary: bytes):
     #print(p.dyld_info)
     parse_binds(mu, binary[p.dyld_info['bind_off']:p.dyld_info['bind_off']+p.dyld_info['bind_size']], p.segments)
 
+def malloc_hook(mu: Uc):
+    print("MALLOC HOOK CALLED!!!")
+
+HOOKS = {
+    'malloc': malloc_hook,
+    '__memset_chk': lambda mu: print("MEMSET HOOK CALLED!!!"),
+}
+
+HOOK_BASE = 0xD00000
+
+FILLED_HOOKS: dict[str, int] = {}
+
+def resolve_hook(mu: Uc, address: int, size: int, user_data):
+    global FILLED_HOOKS
+    for name, addr in FILLED_HOOKS.items():
+        if addr == address:
+            print(f"Hook for {name}")
+            HOOKS[name](mu)
+
+def setup_hooks(mu: Uc):
+    global FILLED_HOOKS, HOOK_BASE, HOOKS
+
+    mu.mem_map(HOOK_BASE, 0x1000)
+    # Write ret instructions to all addresses in mapping
+    mu.mem_write(HOOK_BASE, b"\xc3" * 0x1000)
+
+    i = 0
+    for name in HOOKS:
+        FILLED_HOOKS[name] = HOOK_BASE + i
+    
+    # Setup instruction tracing on the mapping
+    mu.hook_add(UC_HOOK_CODE, resolve_hook, begin=HOOK_BASE, end=HOOK_BASE + 0x1000)
+
+    
+
+
+
+
 BIND_OPCODE_DONE = 0x00
 BIND_OPCODE_SET_DYLIB_ORDINAL_IMM = 0x10
 BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB = 0x20
@@ -86,12 +124,12 @@ BIND_TYPE_POINTER = 1
 DEAD_BIND = 0x800000
 
 BINDS = {
-    'deadbeef': 0xDEADBEEF,
+    #'deadbeef': 0xDEADBEEF,
     '___stack_chk_guard': DEAD_BIND,
-    'n': DEAD_BIND,
-    'radr://5614542': DEAD_BIND,
-    '__FTFakeSMSDeviceID': DEAD_BIND,
-    '_malloc': 0xD00001,
+    #'n': DEAD_BIND,
+    #'radr://5614542': DEAD_BIND,
+    #'__FTFakeSMSDeviceID': DEAD_BIND,
+    #'_malloc': 0xD00001,
 
 }
 
@@ -112,6 +150,8 @@ def do_bind(mu: Uc, type, location, name):
     if type == 1: # BIND_TYPE_POINTER
         if name in BINDS:
             mu.mem_write(location, BINDS[name].to_bytes(8, byteorder='little'))
+        elif name[1:] in HOOKS:
+            mu.mem_write(location, FILLED_HOOKS[name[1:]].to_bytes(8, byteorder='little'))
         else:
             if name not in logged_unknown_binds:
                 logged_unknown_binds.add(name)
@@ -371,10 +411,10 @@ def hook_mem_invalid(uc: Uc, access, address, size, value, user_data):
         print("UC_MEM_WRITE_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
     if access == UC_MEM_FETCH_UNMAPPED:
         print("UC_MEM_FETCH_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
-        if address in MEM_HOOKS:
-            MEM_HOOKS[address](uc)
-            uc.reg_write(UC_X86_REG_EIP, 0xb1db0)
-            return True
+        #if address in MEM_HOOKS:
+            #MEM_HOOKS[address](uc)
+            #uc.reg_write(UC_X86_REG_EIP, 0xb1db0)
+            #return True
     if access == UC_MEM_WRITE_PROT:
         print("UC_MEM_WRITE_PROT of 0x%x at 0x%X, data size = %u" % (address, eip, size))
     if access == UC_MEM_FETCH_PROT:
@@ -416,6 +456,7 @@ def main():
     binary = load_binary()
     binary = get_x64_slice(binary)
     mu = start_unicorn()
+    setup_hooks(mu)
     map_macho_binary(mu, binary)
 
     create_stack(mu)
@@ -432,6 +473,7 @@ def main():
 
     mu.hook_add(UC_HOOK_MEM_INVALID, hook_mem_invalid)
     mu.hook_add(UC_HOOK_CODE, hook_code)
+
 
 
     try:
