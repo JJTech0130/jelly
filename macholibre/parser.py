@@ -199,8 +199,11 @@ class Parser():
         reloff = self.get_int()
         nreloc = self.get_int()
         flags = self.get_int()
+        r1 = self.get_int()
+        r2 = self.get_int()
+        r3 = self.get_int()
 
-        self.__file.read(12) if self.__is_64_bit else self.__file.read(8)
+        #self.__file.read(12) if self.__is_64_bit else self.__file.read(8)
 
         output = {
             'name': name,
@@ -210,7 +213,10 @@ class Parser():
             'align': align,
             'reloff': reloff,
             'nreloc': nreloc,
-            'size': size
+            'size': size,
+            'r1': r1,
+            'r2': r2,
+            'r3': r3
         }
 
         self.parse_section_flags(output, flags)
@@ -803,7 +809,8 @@ class Parser():
                 self.__macho['lcs'].append(parsed)
                 self.segments.append(parsed)
             elif cmd == 'SYMTAB':
-                self.__macho['lcs'].append(self.parse_symtab(cmd, cmd_size))
+                self.symtab = self.parse_symtab(cmd, cmd_size)
+                self.__macho['lcs'].append(self.symtab)
             elif cmd == 'SYMSEG':
                 self.__macho['lcs'].append(self.parse_symseg(cmd, cmd_size))
             elif cmd in ('THREAD', 'UNIXTHREAD'):
@@ -975,6 +982,8 @@ class Parser():
         true_offset = offset + lc_symtab['stroff']
 
         self.__file.seek(true_offset)
+        #self.strtab = bytes(self.__file.read(lc_symtab['strsize']))
+        #self.__file.seek(true_offset)
 
         entropy = self.calc_entropy(self.__file.read(lc_symtab['strsize']))
 
@@ -1632,6 +1641,7 @@ class Parser():
             # imports manually.
             if 'DYSYMTAB' in lcs:
                 lc_dysymtab = self.__macho['lcs'][lcs.index('DYSYMTAB')]
+                self.dysymtab = lc_dysymtab
 
             # Check if the static linker used the two-level namespace feature.
             # If so, pass in the list of dynamic libraries (dylibs) given in
@@ -1649,7 +1659,7 @@ class Parser():
 
             #self.parse_sig(offset, size, lc_codesig)
 
-        self.__macho['strtab'] = None
+        #self.__macho['strtab'] = None
         #self.__macho['symtab'] = None
         self.__macho['imports'] = None
 

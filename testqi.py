@@ -6,7 +6,7 @@ from unicorn import *
 from unicorn.x86_const import *
 
 import macholibre
-import leb128
+#import leb128
 
 import hashlib
 
@@ -45,16 +45,22 @@ def map_macho_binary(mu: Uc, binary: bytes):
 
     # Parse the binary so we can process binds
     p = macholibre.Parser(binary)
-    p.parse()
+    m = p.parse()
+    #print(p.symtab)
+    #print(binary[p.dysymtab['indirectsymoff']:])
+    #print(p.strtab)
     #print(p.segments[0])
     #print(len(p.segments))
     #print(p.segments[2])
-    # for seg in p.segments:
-    #     #print(seg['name'])
-    #     for section in seg['sects']:
-    #         #print(f"{section['name']} : {section['type']}")
-    #         if section['type'] == 'LAZY_SYMBOL_POINTERS' or section['type'] == 'NON_LAZY_SYMBOL_POINTERS':
-    #             print(section)
+    for seg in p.segments:
+         #print(seg['name'])
+        for section in seg['sects']:
+            #print(f"{section['name']} : {section['type']}")
+            if section['type'] == 'LAZY_SYMBOL_POINTERS' or section['type'] == 'NON_LAZY_SYMBOL_POINTERS':
+                #print(section)
+                #pass
+                parse_lazy_binds(mu, section['r1'], section, binary[p.dysymtab['indirectsymoff']:], binary[p.symtab['stroff']:], binary[p.symtab['symoff']:])
+
     # TODO: Deal with in-segment binds
 
     #print(p.dyld_info)
@@ -77,8 +83,15 @@ BIND_OPCODE_THREADED = 0xD0
 
 BIND_TYPE_POINTER = 1
 
+DEAD_BIND = 0x800000
+
 BINDS = {
-    'deadbeef': 0xDEADBEEF
+    'deadbeef': 0xDEADBEEF,
+    '___stack_chk_guard': DEAD_BIND,
+    'n': DEAD_BIND,
+    'radr://5614542': DEAD_BIND,
+    '__FTFakeSMSDeviceID': DEAD_BIND,
+    #'_malloc': 0xDEADEEBB
 }
 
 logged_unknown_binds = set()
@@ -92,6 +105,8 @@ def do_bind(mu: Uc, type, location, name):
             if name not in logged_unknown_binds:
                 logged_unknown_binds.add(name)
                 print(f"Unknown bind {name[1:]}")
+            if name == "_malloc":
+                print("MALLOC WAS HERE")
             #pass
             #print(f"Unknown bind {name}")
     else:
@@ -99,24 +114,38 @@ def do_bind(mu: Uc, type, location, name):
 
 from io import BytesIO
 
-"""
-_uleb128_t uLEB128(const(ubyte)** p)
-{
-    auto q = *p;
-    _uleb128_t result = 0;
-    uint shift = 0;
-    while (1)
-    {
-        ubyte b = *q++;
-        result |= cast(_uleb128_t)(b & 0x7F) << shift;
-        if ((b & 0x80) == 0)
-            break;
-        shift += 7;
-    }
-    *p = q;
-    return result;
-}
-"""
+def c_string(bytes, start: int = 0) -> str:
+    out = ''
+    i = start
+    
+    while True:
+        if i > len(bytes) or bytes[i] == 0:
+            break
+        out += chr(bytes[i])
+        #print(start)
+        #print(chr(bytes[i]))
+        i += 1
+    return out
+
+
+# " indirect " not lazy
+def parse_lazy_binds(mu: Uc, indirect_offset, section, dysimtab, strtab, symtab):
+    print(f"Doing binds for {section['name']}")
+    for i in range(0, int(section['size']/8)):     
+        # Parse into proper list?   
+        dysym = dysimtab[(indirect_offset + i)*4:(indirect_offset + i)*4+4]
+        dysym = int.from_bytes(dysym, 'little')
+        index = dysym & 0x3fffffff
+
+        # Proper list too?
+        symbol = symtab[index * 16:(index * 16) + 4]
+        strx = int.from_bytes(symbol, 'little')
+
+        name = c_string(strtab, strx) # Remove _ at beginning
+        #print(f"Lazy bind for {hex(section['offset'] + (i * 8))} : {name}")
+        do_bind(mu, 1, section['offset'] + (i * 8), name)
+
+
 def decodeULEB128(bytes: BytesIO) -> int:
     result = 0
     shift = 0
@@ -359,6 +388,8 @@ def show_registers(mu: Uc):
             """)
     
 def hook_code(mu: Uc, address: int, size: int, user_data):
+    if address > 0x800000 and address < 0x900000:
+        raise Exception("DEAD")
     print('>>> Tracing instruction at 0x%x, instruction size = 0x%x' % (address, size))
 
 
@@ -368,10 +399,13 @@ def main():
     mu = start_unicorn()
     map_macho_binary(mu, binary)
 
-    return
-
     create_stack(mu)
     create_heap(mu)
+
+    mu.mem_map(DEAD_BIND, 0x1000)
+    mu.mem_write(DEAD_BIND, (DEAD_BIND + 8).to_bytes(8, "little"))
+
+    #return
 
     # Create a return address
     mu.mem_map(STOP_ADDRESS, 0x1000)
