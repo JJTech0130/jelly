@@ -91,8 +91,19 @@ BINDS = {
     'n': DEAD_BIND,
     'radr://5614542': DEAD_BIND,
     '__FTFakeSMSDeviceID': DEAD_BIND,
-    #'_malloc': 0xDEADEEBB
+    '_malloc': 0xD00001,
+
 }
+
+# Symbol hooks: Things that need done:
+# API: name -> python function
+# What we do:
+# 1. Create a memory mapping for hooks
+# 2. Write ret instructions to all addresses in mapping
+# 3. Bind all hooked symbols to the addresses in the mapping, creating a new dictionary address : name
+# 4. Set up instruction tracing on the mapping
+# 5. When we hit a hook, look up the current address in the dictionary, and call the python function
+# 6. Profit?
 
 logged_unknown_binds = set()
 
@@ -340,7 +351,11 @@ def nac_init(mu: Uc, cert: bytes):
 
     return validation_ctx_addr, request
 
-def hook_mem_invalid(uc, access, address, size, value, user_data):
+MEM_HOOKS = {
+    0xD00001: lambda mu: print(f"Malloc"),
+}
+
+def hook_mem_invalid(uc: Uc, access, address, size, value, user_data):
     """For Debugging Use Only"""
     eip = uc.reg_read(UC_X86_REG_EIP)
     show_registers(uc)
@@ -356,6 +371,10 @@ def hook_mem_invalid(uc, access, address, size, value, user_data):
         print("UC_MEM_WRITE_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
     if access == UC_MEM_FETCH_UNMAPPED:
         print("UC_MEM_FETCH_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+        if address in MEM_HOOKS:
+            MEM_HOOKS[address](uc)
+            uc.reg_write(UC_X86_REG_EIP, 0xb1db0)
+            return True
     if access == UC_MEM_WRITE_PROT:
         print("UC_MEM_WRITE_PROT of 0x%x at 0x%X, data size = %u" % (address, eip, size))
     if access == UC_MEM_FETCH_PROT:
