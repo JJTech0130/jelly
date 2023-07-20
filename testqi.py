@@ -6,6 +6,7 @@ from unicorn import *
 from unicorn.x86_const import *
 
 import macholibre
+import leb128
 
 import hashlib
 
@@ -42,6 +43,186 @@ def map_macho_binary(mu: Uc, binary: bytes):
     # Unmap the first page so we can catch NULL derefs
     mu.mem_unmap(0x0, mu.ctl_get_page_size())
 
+    # Parse the binary so we can process binds
+    p = macholibre.Parser(binary)
+    p.parse()
+    #print(p.segments[0])
+    #print(len(p.segments))
+    #print(p.segments[2])
+    # for seg in p.segments:
+    #     #print(seg['name'])
+    #     for section in seg['sects']:
+    #         #print(f"{section['name']} : {section['type']}")
+    #         if section['type'] == 'LAZY_SYMBOL_POINTERS' or section['type'] == 'NON_LAZY_SYMBOL_POINTERS':
+    #             print(section)
+    # TODO: Deal with in-segment binds
+
+    #print(p.dyld_info)
+    parse_binds(mu, binary[p.dyld_info['bind_off']:p.dyld_info['bind_off']+p.dyld_info['bind_size']], p.segments)
+
+BIND_OPCODE_DONE = 0x00
+BIND_OPCODE_SET_DYLIB_ORDINAL_IMM = 0x10
+BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB = 0x20
+BIND_OPCODE_SET_DYLIB_SPECIAL_IMM = 0x30
+BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM = 0x40
+BIND_OPCODE_SET_TYPE_IMM = 0x50
+BIND_OPCODE_SET_ADDEND_SLEB = 0x60
+BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB = 0x70
+BIND_OPCODE_ADD_ADDR_ULEB = 0x80
+BIND_OPCODE_DO_BIND = 0x90
+BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB = 0xA0
+BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED = 0xB0
+BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB = 0xC0
+BIND_OPCODE_THREADED = 0xD0
+
+BIND_TYPE_POINTER = 1
+
+BINDS = {
+    'deadbeef': 0xDEADBEEF
+}
+
+logged_unknown_binds = set()
+
+def do_bind(mu: Uc, type, location, name):
+    global logged_unknown_binds
+    if type == 1: # BIND_TYPE_POINTER
+        if name in BINDS:
+            mu.mem_write(location, BINDS[name].to_bytes(8, byteorder='little'))
+        else:
+            if name not in logged_unknown_binds:
+                logged_unknown_binds.add(name)
+                print(f"Unknown bind {name[1:]}")
+            #pass
+            #print(f"Unknown bind {name}")
+    else:
+        print(f"Unknown bind type {type}")
+
+from io import BytesIO
+
+"""
+_uleb128_t uLEB128(const(ubyte)** p)
+{
+    auto q = *p;
+    _uleb128_t result = 0;
+    uint shift = 0;
+    while (1)
+    {
+        ubyte b = *q++;
+        result |= cast(_uleb128_t)(b & 0x7F) << shift;
+        if ((b & 0x80) == 0)
+            break;
+        shift += 7;
+    }
+    *p = q;
+    return result;
+}
+"""
+def decodeULEB128(bytes: BytesIO) -> int:
+    result = 0
+    shift = 0
+    while True:
+        b = bytes.read(1)[0]
+        result |= (b & 0x7F) << shift
+        if (b & 0x80) == 0:
+            break
+        shift += 7
+    return result
+
+ 
+def parse_binds(mu: Uc, binds: bytes, segments):
+    BIND_OPCODE_MASK = 0xF0
+    BIND_IMMEDIATE_MASK = 0x0F
+    blen = len(binds)
+    binds: BytesIO = BytesIO(binds)
+    #print(binds)
+
+    #offset = 0
+
+    ordinal = 0
+    symbolName = ''
+    type = BIND_TYPE_POINTER
+    addend = 0
+    segIndex = 0
+    segOffset = 0
+
+    while binds.tell() < blen:
+        current = binds.read(1)[0]
+        opcode = current & BIND_OPCODE_MASK
+        immediate = current & BIND_IMMEDIATE_MASK
+
+        #print(f"{hex(offset)}: {hex(opcode)} {hex(immediate)}")
+
+        if opcode == BIND_OPCODE_DONE:
+            print("BIND_OPCODE_DONE")
+            break
+        elif opcode == BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+            ordinal = immediate   
+        elif opcode == BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+            #ordinal = uLEB128(&p);
+            ordinal = decodeULEB128(binds)
+            #raise NotImplementedError("BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB")
+        elif opcode == BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+            if (immediate == 0):
+                ordinal = 0
+            else:
+                ordinal = BIND_OPCODE_MASK | immediate
+        elif opcode == BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+            # Parse string until null terminator
+            symbolName = ''
+            while True:
+                b = binds.read(1)[0]
+                if b == 0:
+                    break
+                symbolName += chr(b)
+            #while binds[offset] != 0:
+            #    symbolName += chr(binds[offset])
+            #    offset += 1
+            #offset += 1
+            #print(f"Symbol name: {symbolName}")
+        elif opcode == BIND_OPCODE_SET_TYPE_IMM:
+            type = immediate
+        elif opcode == BIND_OPCODE_SET_ADDEND_SLEB:
+            #addend = sLEB128(&p);
+            raise NotImplementedError("BIND_OPCODE_SET_ADDEND_SLEB")
+        elif opcode == BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+            segIndex = immediate
+            segOffset = decodeULEB128(binds)
+            #raise NotImplementedError("BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB")
+        elif opcode == BIND_OPCODE_ADD_ADDR_ULEB:
+            segOffset += decodeULEB128(binds)
+            #segOffset += uLEB128(&p);
+            #raise NotImplementedError("BIND_OPCODE_ADD_ADDR_ULEB")
+        elif opcode == BIND_OPCODE_DO_BIND:
+            do_bind(mu, type, segments[segIndex]['offset'] + segOffset, symbolName)
+            segOffset += 8
+        elif opcode == BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+            do_bind(mu, type, segments[segIndex]['offset'] + segOffset, symbolName)
+            segOffset += decodeULEB128(binds) + 8
+            #bind(type, (cast(void**) &segments[segIndex][segOffset]), symbolName, addend, generateFallback);
+            #segOffset += uLEB128(&p) + size_t.sizeof;
+            #raise NotImplementedError("BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB")
+        elif opcode == BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+            #bind(type, (cast(void**) &segments[segIndex][segOffset]), symbolName, addend, generateFallback);
+            do_bind(mu, type, segments[segIndex]['offset'] + segOffset, symbolName)
+            segOffset += immediate * 8 + 8
+        elif opcode == BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+            count = decodeULEB128(binds)
+            skip = decodeULEB128(binds)
+            for i in range(count):
+                do_bind(mu, type, segments[segIndex]['offset'] + segOffset, symbolName)
+                segOffset += skip + 8
+            # uint64_t count = uLEB128(&p);
+            # uint64_t skip = uLEB128(&p);
+            # for (uint64_t i = 0; i < count; i++) {
+            #     bind(type, (cast(void**) &segments[segIndex][segOffset]), symbolName, addend, generateFallback);
+            #     segOffset += skip + size_t.sizeof;
+            # }
+            #raise NotImplementedError("BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB")
+        else:
+            print(f"Unknown bind opcode {opcode}")
+
+
+
 STACK_BASE = 0x00300000
 STACK_SIZE = 0x00100000
 def create_stack(mu: Uc):
@@ -51,13 +232,135 @@ def create_stack(mu: Uc):
     mu.mem_map(stack_base, stack_size)
     mu.mem_write(stack_base, b"\x00" * stack_size)
     
-    mu.reg_write(UC_X86_REG_ESP, stack_base + 0x800)
-    mu.reg_write(UC_X86_REG_EBP, stack_base + 0x1000)
+    mu.reg_write(UC_X86_REG_ESP, stack_base + stack_size)
+    mu.reg_write(UC_X86_REG_EBP, stack_base + stack_size)
 
 def push_stack(mu: Uc, data: bytes):
     esp = mu.reg_read(UC_X86_REG_ESP)
     mu.mem_write(esp - len(data), data)
     mu.reg_write(UC_X86_REG_ESP, esp - len(data))
+
+HEAP_BASE = 0x00400000
+HEAP_SIZE = 0x00100000
+
+HEAP_USE  = 0x0
+
+def create_heap(mu: Uc):
+    mu.mem_map(HEAP_BASE, HEAP_SIZE)
+    mu.mem_write(HEAP_BASE, b"\x00" * HEAP_SIZE)
+
+def malloc(mu: Uc, size: int):
+    global HEAP_USE
+    HEAP_USE += size
+    return HEAP_BASE + HEAP_USE - size
+
+
+STOP_ADDRESS = 0x00900000
+
+
+def call_function(mu: Uc, addr: int, args: list[int]):
+    # Put the first 6 args in registers
+    mu.reg_write(UC_X86_REG_RDI, args[0] if len(args) > 0 else 0)
+    mu.reg_write(UC_X86_REG_RSI, args[1] if len(args) > 1 else 0)
+    mu.reg_write(UC_X86_REG_RDX, args[2] if len(args) > 2 else 0)
+    mu.reg_write(UC_X86_REG_RCX, args[3] if len(args) > 3 else 0)
+    mu.reg_write(UC_X86_REG_R8, args[4] if len(args) > 4 else 0)
+    mu.reg_write(UC_X86_REG_R9, args[5] if len(args) > 5 else 0)
+
+    print("Arguments: ", [hex(x) for x in args])
+
+    # Push the rest of the args on the stack
+    for arg in args[6:]:
+        push_stack(mu, arg.to_bytes(8, "little"))
+
+    # Push return address
+    push_stack(mu, STOP_ADDRESS.to_bytes(8, "little"))
+
+    print(f"RBP: {hex(mu.reg_read(UC_X86_REG_RBP))}, RSP: {hex(mu.reg_read(UC_X86_REG_RSP))}")
+
+    show_registers(mu)
+
+    # Call the function
+    mu.emu_start(addr, STOP_ADDRESS)
+
+    # Get the return value
+    return mu.reg_read(UC_X86_REG_RAX)
+
+#NACInit(const void *cert_bytes, int cert_len, void **out_validation_ctx,
+#            void **out_request_bytes, int *out_request_len)
+
+def nac_init(mu: Uc, cert: bytes):
+    # Allocate memory for the cert
+    cert_addr = malloc(mu, len(cert))
+    mu.mem_write(cert_addr, cert)
+
+    # Allocate memory for the outputs
+    out_validation_ctx_addr = malloc(mu, 8)
+    out_request_bytes_addr = malloc(mu, 8)
+    out_request_len_addr = malloc(mu, 8)
+
+    # Call the function
+    ret = call_function(mu, 0xb1db0, [cert_addr, len(cert), out_validation_ctx_addr, out_request_bytes_addr, out_request_len_addr])
+
+    # Get the outputs
+    validation_ctx_addr = mu.mem_read(out_validation_ctx_addr, 8)
+    request_bytes_addr = mu.mem_read(out_request_bytes_addr, 8)
+    request_len = mu.mem_read(out_request_len_addr, 8)
+
+    request = mu.mem_read(request_bytes_addr, request_len)
+
+    return validation_ctx_addr, request
+
+def hook_mem_invalid(uc, access, address, size, value, user_data):
+    """For Debugging Use Only"""
+    eip = uc.reg_read(UC_X86_REG_EIP)
+    show_registers(uc)
+    if access == UC_MEM_WRITE:
+        print("invalid WRITE of 0x%x at 0x%X, data size = %u, data value = 0x%x" % (address, eip, size, value))
+    if access == UC_MEM_READ:
+        print("invalid READ of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_FETCH:
+        print("UC_MEM_FETCH of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_READ_UNMAPPED:
+        print("UC_MEM_READ_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_WRITE_UNMAPPED:
+        print("UC_MEM_WRITE_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_FETCH_UNMAPPED:
+        print("UC_MEM_FETCH_UNMAPPED of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_WRITE_PROT:
+        print("UC_MEM_WRITE_PROT of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_FETCH_PROT:
+        print("UC_MEM_FETCH_PROT of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_FETCH_PROT:
+        print("UC_MEM_FETCH_PROT of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    if access == UC_MEM_READ_AFTER:
+        print("UC_MEM_READ_AFTER of 0x%x at 0x%X, data size = %u" % (address, eip, size))
+    return False
+
+def show_registers(mu: Uc):
+    print(f"""
+            RAX: {hex(mu.reg_read(UC_X86_REG_RAX))}
+            RBX: {hex(mu.reg_read(UC_X86_REG_RBX))}
+    (arg 4) RCX: {hex(mu.reg_read(UC_X86_REG_RCX))}
+    (arg 3) RDX: {hex(mu.reg_read(UC_X86_REG_RDX))}
+    (arg 2) RSI: {hex(mu.reg_read(UC_X86_REG_RSI))}
+    (arg 1) RDI: {hex(mu.reg_read(UC_X86_REG_RDI))}
+            RBP: {hex(mu.reg_read(UC_X86_REG_RBP))}
+            RSP: {hex(mu.reg_read(UC_X86_REG_RSP))}
+            RIP: {hex(mu.reg_read(UC_X86_REG_RIP))}
+    (arg 5) R8:  {hex(mu.reg_read(UC_X86_REG_R8))}
+    (arg 6) R9:  {hex(mu.reg_read(UC_X86_REG_R9))}
+            R10: {hex(mu.reg_read(UC_X86_REG_R10))}
+            R11: {hex(mu.reg_read(UC_X86_REG_R11))}
+            R12: {hex(mu.reg_read(UC_X86_REG_R12))}
+            R13: {hex(mu.reg_read(UC_X86_REG_R13))}
+            R14: {hex(mu.reg_read(UC_X86_REG_R14))}
+            R15: {hex(mu.reg_read(UC_X86_REG_R15))}
+            """)
+    
+def hook_code(mu: Uc, address: int, size: int, user_data):
+    print('>>> Tracing instruction at 0x%x, instruction size = 0x%x' % (address, size))
+
 
 def main():
     binary = load_binary()
@@ -65,19 +368,42 @@ def main():
     mu = start_unicorn()
     map_macho_binary(mu, binary)
 
+    return
+
     create_stack(mu)
+    create_heap(mu)
 
     # Create a return address
-    STOP_ADDRESS = 0x00900000
     mu.mem_map(STOP_ADDRESS, 0x1000)
     mu.mem_write(STOP_ADDRESS, b"\x90" * 0x1000)
 
-    push_stack(mu, STOP_ADDRESS.to_bytes(8, "little"))
+    mu.hook_add(UC_HOOK_MEM_INVALID, hook_mem_invalid)
+    mu.hook_add(UC_HOOK_CODE, hook_code)
 
-    print("Starting emulation")
-    mu.emu_start(0xb1db0, STOP_ADDRESS)
-    print("Emulation done")
-    print("Return value:", hex(mu.reg_read(UC_X86_REG_RAX)))
+
+    try:
+        nac_init(mu, b"\x00" * 10)
+    except UcError as e:
+        print("Error:", e)
+        print("Address:", hex(mu.reg_read(UC_X86_REG_RIP)))
+        print("RSP:", hex(mu.reg_read(UC_X86_REG_RSP)))
+        print("RBP:", hex(mu.reg_read(UC_X86_REG_RBP)))
+        # Print the instruction that caused the error
+        print("Instruction:", mu.mem_read(mu.reg_read(UC_X86_REG_RIP), 16).hex())
+
+    # push_stack(mu, STOP_ADDRESS.to_bytes(8, "little"))
+
+    # print("Starting emulation")
+    # mu.emu_start(0xb1db0, STOP_ADDRESS)
+    # print("Emulation done")
+    # print("Return value:", hex(mu.reg_read(UC_X86_REG_RAX)))
+
+    #try:
+    #    ret = call_function(mu, 0xb1db0, [0x1, 0x1])
+    #    print("Return value:", hex(ret))
+    #except UcError as e:
+    #    print("Error:", e)
+    #    print("Address:", hex(mu.reg_read(UC_X86_REG_RIP)))
 
 
     # Set the return address to 0x1000
@@ -91,6 +417,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
     

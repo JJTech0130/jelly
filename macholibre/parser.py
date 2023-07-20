@@ -851,7 +851,8 @@ class Parser():
                 self.__macho['lcs'].append(
                     self.parse_encryption_info(cmd, cmd_size))
             elif cmd in ('DYLD_INFO', 'DYLD_INFO_ONLY'):
-                self.__macho['lcs'].append(self.parse_dyld_info(cmd, cmd_size))
+                self.dyld_info = self.parse_dyld_info(cmd, cmd_size)
+                self.__macho['lcs'].append(self.dyld_info)
             elif cmd in ('VERSION_MIN_MACOSX', 'VERSION_MIN_IPHONEOS',
                          'VERSION_MIN_WATCHOS', 'VERSION_MIN_TVOS'):
                 self.__macho['lcs'].append(
