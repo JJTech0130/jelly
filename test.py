@@ -52,7 +52,7 @@ def nac_init(j: Jelly, cert: bytes):
     out_request_len_addr = j.malloc(8)
 
     # Call the function
-    j.instr.call(
+    ret = j.instr.call(
         0xB1DB0,
         [
             cert_addr,
@@ -63,6 +63,13 @@ def nac_init(j: Jelly, cert: bytes):
         ],
     )
 
+    #print(hex(ret))
+
+    if ret != 0:
+        n = ret & 0xffffffff
+        n = (n ^ 0x80000000) - 0x80000000
+        raise Exception(f"Error calling nac_init: {hex(n)}")
+    
     # Get the outputs
     validation_ctx_addr = j.uc.mem_read(out_validation_ctx_addr, 8)
     request_bytes_addr = j.uc.mem_read(out_request_bytes_addr, 8)
@@ -143,8 +150,90 @@ def CFGetTypeID(j: Jelly, obj: int):
     else:
         raise Exception("Unknown CF object type")
                                                                                                                       
+def CFDataGetLength(j: Jelly, obj: int):
+    obj = CF_OBJECTS[obj - 1]
+    if isinstance(obj, bytes):
+        return len(obj)
+    else:
+        raise Exception("Unknown CF object type")
+    
+def CFDataGetBytes(j: Jelly, obj: int, range_start: int, range_end: int, buf: int):
+    obj = CF_OBJECTS[obj - 1]
+    if isinstance(obj, bytes):
+        data = obj[range_start:range_end]
+        j.uc.mem_write(buf, data)
+        print(f"CFDataGetBytes: {hex(range_start)}-{hex(range_end)} -> {hex(buf)}")
+        return len(data)
+    else:
+        raise Exception("Unknown CF object type")
+    
+def CFDictionaryCreateMutable(j: Jelly) -> int:
+    CF_OBJECTS.append({})
+    return len(CF_OBJECTS)
 
+def maybe_object_maybe_string(j: Jelly, obj: int):
+    # If it's already a str
+    if isinstance(obj, str):
+        return obj
+    elif obj > len(CF_OBJECTS):
+        # This is probably a CFString
+        return _parse_cfstr_ptr(j, obj)
+    else:
+        return CF_OBJECTS[obj - 1]
 
+def CFDictionaryGetValue(j: Jelly, d: int, key: int) -> int:
+    print(f"CFDictionaryGetValue: {d} {hex(key)}")
+    d = CF_OBJECTS[d - 1]
+    if key == 0xc3c3c3c3c3c3c3c3:
+        key = "DADiskDescriptionVolumeUUIDKey" # Weirdness, this is a hack
+    key = maybe_object_maybe_string(j, key)
+    if isinstance(d, dict):
+        if key in d:
+            val = d[key]
+            print(f"CFDictionaryGetValue: {key} -> {val}")
+            CF_OBJECTS.append(val)
+            return len(CF_OBJECTS)
+        else:
+            raise Exception("Key not found")
+            return 0
+    else:
+        raise Exception("Unknown CF object type")
+    
+def CFDictionarySetValue(j: Jelly, d: int, key: int, val: int):
+    d = CF_OBJECTS[d - 1]
+    key = maybe_object_maybe_string(j, key)
+    val = maybe_object_maybe_string(j, val)
+    if isinstance(d, dict):
+        d[key] = val
+    else:
+        raise Exception("Unknown CF object type")
+
+def DADiskCopyDescription(j: Jelly) -> int:
+    description = CFDictionaryCreateMutable(j)
+    CFDictionarySetValue(j, description, "DADiskDescriptionVolumeUUIDKey", FAKE_DATA["root_disk_uuid"])
+    return description    
+
+def CFStringCreate(j: Jelly, string: str) -> int:
+    CF_OBJECTS.append(string)
+    return len(CF_OBJECTS)
+
+def CFStringGetLength(j: Jelly, string: int) -> int:
+    string = CF_OBJECTS[string - 1]
+    if isinstance(string, str):
+        return len(string)
+    else:
+        raise Exception("Unknown CF object type")
+
+def CFStringGetCString(j: Jelly, string: int, buf: int, buf_len: int, encoding: int) -> int:
+    string = CF_OBJECTS[string - 1]
+    if isinstance(string, str):
+        data = string.encode("utf-8")
+        j.uc.mem_write(buf, data)
+        print(f"CFStringGetCString: {string} -> {hex(buf)}")
+        return len(data)
+    else:
+        raise Exception("Unknown CF object type")
+    
 def main():
     binary = load_binary()
     binary = get_x64_slice(binary)
@@ -163,6 +252,22 @@ def main():
         "_CFGetTypeID": CFGetTypeID,
         "_CFStringGetTypeID": lambda _: 2,
         "_CFDataGetTypeID": lambda _: 1,
+        "_CFDataGetLength": CFDataGetLength,
+        "_CFDataGetBytes": CFDataGetBytes,
+        "_CFRelease": lambda _: 0,
+        "_IOObjectRelease": lambda _: 0,
+        "_statfs$INODE64": lambda _: 0,
+        "_DASessionCreate": lambda _: 201,
+        "_DADiskCreateFromBSDName": lambda _: 202,
+        "_kDADiskDescriptionVolumeUUIDKey": lambda: 0,
+        "_DADiskCopyDescription": DADiskCopyDescription,
+        "_CFDictionaryGetValue": CFDictionaryGetValue,
+        "_CFUUIDCreateString": lambda _, __, uuid: uuid,
+        "_CFStringGetLength": CFStringGetLength,
+        "_CFStringGetMaximumSizeForEncoding": lambda _, length, __: length,
+        "_CFStringGetCString": CFStringGetCString,
+        "_free": lambda _: 0,
+
     }
     j.setup(hooks)
     j.uc.hook_add(unicorn.UC_HOOK_CODE, hook_code)
