@@ -52,6 +52,11 @@ def hook_code(uc, address: int, size: int, user_data):
         raise Exception("DEAD")
     print('>>> Tracing instruction at 0x%x, instruction size = 0x%x' % (address, size))
 
+def memset_chk(j: jelly.Jelly, dest: int, c: int, len: int, destlen: int):
+    print("memset_chk called with dest = 0x%x, c = 0x%x, len = 0x%x, destlen = 0x%x" % (dest, c, len, destlen))
+    j._uc.mem_write(dest, bytes([c]) * len)
+    return 0
+
 def main():
     binary = load_binary()
     binary = get_x64_slice(binary)
@@ -60,6 +65,7 @@ def main():
     hooks = {
         "_malloc": malloc_hook,
         "___stack_chk_guard": lambda: 0,
+        "___memset_chk": memset_chk,
     }
     j.setup(hooks)
     j._uc.hook_add(jelly.unicorn.UC_HOOK_CODE, hook_code)

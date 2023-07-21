@@ -35,6 +35,7 @@ class VirtualInstructions:
 
     
     def call(self, address: int, args: list[int] = []):
+        print(f"Calling {hex(address)} with args {args}")
         self.push(STOP_ADDRESS)
         self._set_args(args)
         self.uc.emu_start(address, STOP_ADDRESS)
@@ -99,6 +100,20 @@ class Jelly:
         self._uc.mem_map(self.HEAP_BASE, self.HEAP_SIZE)
         self._uc.mem_write(self.HEAP_BASE, b"\x00" * self.HEAP_SIZE)
 
+    def debug_registers(self):
+        print(f"""
+        RAX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RAX))}
+        RBX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RBX))}
+        RCX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RCX))}
+        RDX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RDX))}
+        RSI: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RSI))}
+        RDI: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RDI))}
+        RSP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RSP))}
+        RBP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RBP))}
+        RIP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RIP))}
+        R8: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_R8))}
+        R9: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_R9))}
+              """)
     def wrap_hook(self, func: callable) -> callable:
         # Get the number of arguments the function takes
         arg_count = func.__code__.co_argcount
@@ -108,10 +123,12 @@ class Jelly:
             args = []
             for i in range(1, arg_count):
                 if i < 6:
-                    args.append(self._uc.reg_read(ARG_REGISTERS[i]))
+                    args.append(self._uc.reg_read(ARG_REGISTERS[i-1]))
                 else:
                     args.append(self.instr.pop())
-            #print(f"Calling {func.__name__} with args {args}, should ")
+            #print(ARG_REGISTERS[1])
+            #self.debug_registers()
+            print(f"Calling {func.__name__} with args {args}, should ")
             ret = func(self, *args)
             self._uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
             return
