@@ -5,6 +5,23 @@ import unicorn
 BINARY_HASH = "e1181ccad82e6629d52c6a006645ad87ee59bd13"
 BINARY_PATH = "/Users/jjtech/Downloads/IMDAppleServices"
 
+FAKE_DATA = {
+    "iokit": {
+        "4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14:MLB": b"CK1340351BH8U",
+		"4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14:ROM": b'\xb4\x8b\x19\x88\xb8\x80',
+		"Fyp98tpgj": b'/ONK\xdd\xf3\x01f\x85[BK\x03W;\xdei',
+		"Gq3489ugfi": b'\xd4J\xd2s\xcaJ\xd8\xd1<\xfcy\x96\x80\x19\xf9d\xe8',
+		"IOMACAddress": b'\xee\xe9\xd3\x14\x05\xcf',
+		"IOPlatformSerialNumber": "CK1350NCEUH",
+		"IOPlatformUUID": "ABB178CD-25C5-5AFB-A749-B432FD683AE1",
+		"abKPld1EcMni": b'\xbeT\x9c\xe8F\xf4\x02{d\xc7\xa1\xeb-\x1aA\xc3~',
+		"board-id": b'Mac-F221BEC8\x00',
+		"kbjfrfpoJU": b'l\x99\xea\xa6\x07\xefE\xb3\t\xab\x01\x05\xa2\xd6\x199\x80',
+		"oycqAZloTNDm": b'\x95LQ@\x807\xaa?F\x11z\xf3s\x0e\x04_\x8f',
+		"product-name": b'MacPro5,1\x00',
+    },
+	"root_disk_uuid": "FDB13F90-6FDA-3A57-BA48-CFF31478CAF2"
+}
 
 def load_binary() -> bytes:
     # Open the file at BINARY_PATH, check the hash, and return the binary
@@ -88,6 +105,45 @@ def memcpy(j: Jelly, dest: int, src: int, len: int):
     j.uc.mem_write(dest, bytes(orig))
     return 0
 
+CF_OBJECTS = []
+
+# struct __builtin_CFString {
+#     int *isa; // point to __CFConstantStringClassReference
+#     int flags;
+#     const char *str;
+#     long length;
+# }
+import struct
+
+def _parse_cfstr_ptr(j: Jelly, ptr: int) -> str:
+    size = struct.calcsize("<QQQQ")
+    data = j.uc.mem_read(ptr, size)
+    isa, flags, str_ptr, length = struct.unpack("<QQQQ", data)
+    str_data = j.uc.mem_read(str_ptr, length)
+    return str_data.decode("utf-8")
+
+def IORegistryEntryCreateCFProperty(j: Jelly, entry: int, key: int, allocator: int, options: int):
+    key_str = _parse_cfstr_ptr(j, key)
+    if key_str in FAKE_DATA["iokit"]:
+        fake = FAKE_DATA["iokit"][key_str]
+        print(f"IOKit Entry: {key_str} -> {fake}")
+        # Return the index of the fake data in CF_OBJECTS
+        CF_OBJECTS.append(fake)
+        return len(CF_OBJECTS) # NOTE: We will have to subtract 1 from this later, can't return 0 here since that means NULL
+    else:
+        print(f"IOKit Entry: {key_str} -> None")
+        return 0
+        
+def CFGetTypeID(j: Jelly, obj: int):
+    obj = CF_OBJECTS[obj - 1]
+    if isinstance(obj, bytes):
+        return 1
+    elif isinstance(obj, str):
+        return 2
+    else:
+        raise Exception("Unknown CF object type")
+                                                                                                                      
+
 
 def main():
     binary = load_binary()
@@ -98,9 +154,15 @@ def main():
         "_malloc": malloc,
         "___stack_chk_guard": lambda: 0,
         "___memset_chk": memset_chk,
-        "_sysctlbyname": sysctlbyname,
+        "_sysctlbyname": lambda _: 0,
         "_memcpy": memcpy,
         "_kIOMasterPortDefault": lambda: 0,
+        "_IORegistryEntryFromPath": lambda _: 1,
+        "_kCFAllocatorDefault": lambda: 0,
+        "_IORegistryEntryCreateCFProperty": IORegistryEntryCreateCFProperty,
+        "_CFGetTypeID": CFGetTypeID,
+        "_CFStringGetTypeID": lambda _: 2,
+        "_CFDataGetTypeID": lambda _: 1,
     }
     j.setup(hooks)
     j.uc.hook_add(unicorn.UC_HOOK_CODE, hook_code)
