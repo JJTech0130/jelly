@@ -130,7 +130,8 @@ class Jelly:
             #self.debug_registers()
             print(f"Calling {func.__name__} with args {args}, should ")
             ret = func(self, *args)
-            self._uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
+            if ret is not None:
+                self._uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
             return
         return wrapper
 

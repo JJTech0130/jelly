@@ -57,6 +57,15 @@ def memset_chk(j: jelly.Jelly, dest: int, c: int, len: int, destlen: int):
     j._uc.mem_write(dest, bytes([c]) * len)
     return 0
 
+def sysctlbyname(j: jelly.Jelly):
+    return 0 # The output is not checked
+
+def memcpy(j: jelly.Jelly, dest: int, src: int, len: int):
+    print("memcpy called with dest = 0x%x, src = 0x%x, len = 0x%x" % (dest, src, len))
+    orig = j._uc.mem_read(dest, len)
+    j._uc.mem_write(dest, bytes(orig))
+    return 0
+
 def main():
     binary = load_binary()
     binary = get_x64_slice(binary)
@@ -66,6 +75,9 @@ def main():
         "_malloc": malloc_hook,
         "___stack_chk_guard": lambda: 0,
         "___memset_chk": memset_chk,
+        "_sysctlbyname": sysctlbyname,
+        "_memcpy": memcpy,
+        "_kIOMasterPortDefault": lambda: 0,
     }
     j.setup(hooks)
     j._uc.hook_add(jelly.unicorn.UC_HOOK_CODE, hook_code)
