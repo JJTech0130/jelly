@@ -66,9 +66,10 @@ class Jelly:
 
     instr: VirtualInstructions = None
 
+    uc: unicorn.Uc = None
+    
     # Private variables
     _binary: bytes = b""
-    _uc: unicorn.Uc = None
 
     _heap_use: int = 0
 
@@ -78,7 +79,7 @@ class Jelly:
     def setup(self, hooks: dict[str, callable] = {}):
         self._hooks = hooks
         self._setup_unicorn()
-        self.instr = VirtualInstructions(self._uc)
+        self.instr = VirtualInstructions(self.uc)
         self._setup_hooks()
         self._map_binary()
         self._setup_stack()
@@ -87,32 +88,32 @@ class Jelly:
 
 
     def _setup_unicorn(self):
-        self._uc = unicorn.Uc(self.UC_ARCH, self.UC_MODE)
+        self.uc = unicorn.Uc(self.UC_ARCH, self.UC_MODE)
 
     def _setup_stack(self):   
-        self._uc.mem_map(self.STACK_BASE, self.STACK_SIZE)
-        self._uc.mem_write(self.STACK_BASE, b"\x00" * self.STACK_SIZE)
+        self.uc.mem_map(self.STACK_BASE, self.STACK_SIZE)
+        self.uc.mem_write(self.STACK_BASE, b"\x00" * self.STACK_SIZE)
         
-        self._uc.reg_write(unicorn.x86_const.UC_X86_REG_ESP, self.STACK_BASE + self.STACK_SIZE)
-        self._uc.reg_write(unicorn.x86_const.UC_X86_REG_EBP, self.STACK_BASE + self.STACK_SIZE)
+        self.uc.reg_write(unicorn.x86_const.UC_X86_REG_ESP, self.STACK_BASE + self.STACK_SIZE)
+        self.uc.reg_write(unicorn.x86_const.UC_X86_REG_EBP, self.STACK_BASE + self.STACK_SIZE)
 
     def _setup_heap(self):
-        self._uc.mem_map(self.HEAP_BASE, self.HEAP_SIZE)
-        self._uc.mem_write(self.HEAP_BASE, b"\x00" * self.HEAP_SIZE)
+        self.uc.mem_map(self.HEAP_BASE, self.HEAP_SIZE)
+        self.uc.mem_write(self.HEAP_BASE, b"\x00" * self.HEAP_SIZE)
 
     def debug_registers(self):
         print(f"""
-        RAX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RAX))}
-        RBX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RBX))}
-        RCX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RCX))}
-        RDX: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RDX))}
-        RSI: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RSI))}
-        RDI: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RDI))}
-        RSP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RSP))}
-        RBP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RBP))}
-        RIP: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_RIP))}
-        R8: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_R8))}
-        R9: {hex(self._uc.reg_read(unicorn.x86_const.UC_X86_REG_R9))}
+        RAX: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RAX))}
+        RBX: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RBX))}
+        RCX: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RCX))}
+        RDX: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RDX))}
+        RSI: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RSI))}
+        RDI: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RDI))}
+        RSP: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RSP))}
+        RBP: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RBP))}
+        RIP: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_RIP))}
+        R8: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_R8))}
+        R9: {hex(self.uc.reg_read(unicorn.x86_const.UC_X86_REG_R9))}
               """)
     def wrap_hook(self, func: callable) -> callable:
         # Get the number of arguments the function takes
@@ -123,7 +124,7 @@ class Jelly:
             args = []
             for i in range(1, arg_count):
                 if i < 6:
-                    args.append(self._uc.reg_read(ARG_REGISTERS[i-1]))
+                    args.append(self.uc.reg_read(ARG_REGISTERS[i-1]))
                 else:
                     args.append(self.instr.pop())
             #print(ARG_REGISTERS[1])
@@ -131,7 +132,7 @@ class Jelly:
             print(f"Calling {func.__name__} with args {args}, should ")
             ret = func(self, *args)
             if ret is not None:
-                self._uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
+                self.uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
             return
         return wrapper
 
@@ -143,8 +144,8 @@ class Jelly:
         return addr
 
     def _setup_stop(self):
-        self._uc.mem_map(self.STOP_ADDRESS, 0x1000)
-        self._uc.mem_write(self.STOP_ADDRESS, b"\xc3" * 0x1000)
+        self.uc.mem_map(self.STOP_ADDRESS, 0x1000)
+        self.uc.mem_write(self.STOP_ADDRESS, b"\xc3" * 0x1000)
 
     def _resolve_hook(uc: unicorn.Uc, address: int, size: int, self: 'Jelly'):
         for name, addr in self._resolved_hooks.items():
@@ -157,9 +158,9 @@ class Jelly:
         for name, func in self._hooks.items():
             self._hooks[name] = self.wrap_hook(func)
         
-        self._uc.mem_map(self.HOOK_BASE, self.HOOK_SIZE)
+        self.uc.mem_map(self.HOOK_BASE, self.HOOK_SIZE)
         # Write 'ret' instruction to all hook addresses
-        self._uc.mem_write(self.HOOK_BASE, b"\xc3" * self.HOOK_SIZE)
+        self.uc.mem_write(self.HOOK_BASE, b"\xc3" * self.HOOK_SIZE)
         # Assign address in hook space to each hook
         current_address = self.HOOK_BASE
         self._resolved_hooks = {}
@@ -167,14 +168,14 @@ class Jelly:
             self._resolved_hooks[hook] = current_address
             current_address += 1
         # Add unicorn instruction hook to entire hook space
-        self._uc.hook_add(unicorn.UC_HOOK_CODE, Jelly._resolve_hook, begin=self.HOOK_BASE, end=self.HOOK_BASE + self.HOOK_SIZE, user_data=self)
+        self.uc.hook_add(unicorn.UC_HOOK_CODE, Jelly._resolve_hook, begin=self.HOOK_BASE, end=self.HOOK_BASE + self.HOOK_SIZE, user_data=self)
 
     def _map_binary(self):
-        self._uc.mem_map(self.BINARY_BASE, round_to_page_size(len(self._binary), self._uc.ctl_get_page_size()))
-        self._uc.mem_write(self.BINARY_BASE, self._binary)
+        self.uc.mem_map(self.BINARY_BASE, round_to_page_size(len(self._binary), self.uc.ctl_get_page_size()))
+        self.uc.mem_write(self.BINARY_BASE, self._binary)
 
         # Unmap the first page so we can catch NULL derefs
-        self._uc.mem_unmap(0x0, self._uc.ctl_get_page_size())
+        self.uc.mem_unmap(0x0, self.uc.ctl_get_page_size())
 
         # Parse the binary so we can process binds
         p = macholibre.Parser(self._binary)
@@ -183,9 +184,9 @@ class Jelly:
         for seg in p.segments:
             for section in seg['sects']:
                 if section['type'] == 'LAZY_SYMBOL_POINTERS' or section['type'] == 'NON_LAZY_SYMBOL_POINTERS':
-                    self._parse_lazy_binds(self._uc, section['r1'], section, self._binary[p.dysymtab['indirectsymoff']:], self._binary[p.symtab['stroff']:], self._binary[p.symtab['symoff']:])
+                    self._parse_lazy_binds(self.uc, section['r1'], section, self._binary[p.dysymtab['indirectsymoff']:], self._binary[p.symtab['stroff']:], self._binary[p.symtab['symoff']:])
 
-        self._parse_binds(self._uc, self._binary[p.dyld_info['bind_off']:p.dyld_info['bind_off']+p.dyld_info['bind_size']], p.segments)
+        self._parse_binds(self.uc, self._binary[p.dyld_info['bind_off']:p.dyld_info['bind_off']+p.dyld_info['bind_size']], p.segments)
 
     def _do_bind(self, mu: unicorn.Uc, type, location, name):
         if type == 1: # BIND_TYPE_POINTER
