@@ -135,6 +135,10 @@ class Jelly:
                 self._hooks[name](self)
     
     def _setup_hooks(self):
+        # Wrap all hooks
+        for name, func in self._hooks.items():
+            self._hooks[name] = self.wrap_hook(func)
+        
         self._uc.mem_map(self.HOOK_BASE, self.HOOK_SIZE)
         # Write 'ret' instruction to all hook addresses
         self._uc.mem_write(self.HOOK_BASE, b"\xc3" * self.HOOK_SIZE)

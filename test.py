@@ -58,7 +58,7 @@ def main():
     # Create a Jelly object from the binary
     j = jelly.Jelly(binary)
     hooks = {
-        "_malloc": j.wrap_hook(malloc_hook),
+        "_malloc": malloc_hook,
         "___stack_chk_guard": lambda: 0,
     }
     j.setup(hooks)
