@@ -8,7 +8,10 @@ from unicorn.x86_const import *
 import macholibre
 #import leb128
 
+import jelly
 import hashlib
+
+jelly.Jelly()._hooks
 
 
 def load_binary() -> bytes:
