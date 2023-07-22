@@ -129,7 +129,11 @@ class Jelly:
                     args.append(self.instr.pop())
             #print(ARG_REGISTERS[1])
             #self.debug_registers()
-            print(f"Calling {func.__name__} with args {args}, should ")
+            print(f"calling {func.__name__}", end="")
+            if args != []:
+                print(f" with args: {args}")
+            else:
+                print()
             ret = func(self, *args)
             if ret is not None:
                 self.uc.reg_write(unicorn.x86_const.UC_X86_REG_RAX, ret)
@@ -150,7 +154,7 @@ class Jelly:
     def _resolve_hook(uc: unicorn.Uc, address: int, size: int, self: 'Jelly'):
         for name, addr in self._resolved_hooks.items():
             if addr == address:
-                print(f"Hook for {name}")
+                print(f"{name}: ", end="")
                 self._hooks[name](self)
     
     def _setup_hooks(self):
