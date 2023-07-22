@@ -26,8 +26,8 @@ from re import split
 from struct import unpack
 from uuid import UUID
 
-from asn1crypto.cms import ContentInfo
-from asn1crypto.x509 import DirectoryString
+#from asn1crypto.cms import ContentInfo
+#from asn1crypto.x509 import DirectoryString
 from plistlib import loads
 
 import macholibre.dictionary as dictionary
