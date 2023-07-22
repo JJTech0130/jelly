@@ -3,7 +3,8 @@ from jelly import Jelly
 import unicorn
 
 BINARY_HASH = "e1181ccad82e6629d52c6a006645ad87ee59bd13"
-BINARY_PATH = "/Users/jjtech/Downloads/IMDAppleServices"
+BINARY_PATH = "/Users/jjtech/Downloads/IMDAppleServices222"
+BINARY_URL = "https://github.com/JJTech0130/nacserver/raw/main/IMDAppleServices"
 
 FAKE_DATA = {
     "iokit": {
@@ -26,7 +27,14 @@ FAKE_DATA = {
 def load_binary() -> bytes:
     # Open the file at BINARY_PATH, check the hash, and return the binary
     # If the hash doesn't match, raise an exception
-    b = open(BINARY_PATH, "rb").read()
+    # Download the binary if it doesn't exist
+    import os, requests
+    if not os.path.exists(BINARY_PATH):
+        print("Downloading binary...")
+        resp = requests.get(BINARY_URL)
+        b = resp.content
+    else:
+        b = open(BINARY_PATH, "rb").read()
     if hashlib.sha1(b).hexdigest() != BINARY_HASH:
         raise Exception("Hashes don't match")
     return b
@@ -352,8 +360,8 @@ def get_session_info(req: bytes) -> bytes:
 
 def arc4random(j: Jelly) -> int:
     import random
-    #return random.randint(0, 0xFFFFFFFF)
-    return 0
+    return random.randint(0, 0xFFFFFFFF)
+    #return 0
 
 def main():
     binary = load_binary()
