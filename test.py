@@ -1,32 +1,13 @@
 import hashlib
 import mparser as macholibre
 from jelly import Jelly
-#import unicorn
+import plistlib
 
 BINARY_HASH = "e1181ccad82e6629d52c6a006645ad87ee59bd13"
 BINARY_PATH = "/Users/jjtech/Downloads/IMDAppleServices"
 BINARY_URL = "https://github.com/JJTech0130/nacserver/raw/main/IMDAppleServices"
 
-FAKE_DATA = {
-    "iokit": {
-		"board-id": b'Mac-F221BEC8\x00',
-		"product-name": b'MacPro5,1\x00',
-        
-		"IOMACAddress": b'\xee\xe9\xd3\x14\x05\xcf',
-		"IOPlatformSerialNumber": "CK1350NCEUH",
-		"IOPlatformUUID": "ABB178CD-25C5-5AFB-A749-B432FD683AE1",
-        
-        "4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14:MLB": b"CK1340351BH8U",
-		"4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14:ROM": b'\xb4\x8b\x19\x88\xb8\x80',
-		
-        "Fyp98tpgj": b'/ONK\xdd\xf3\x01f\x85[BK\x03W;\xdei',
-		"Gq3489ugfi": b'\xd4J\xd2s\xcaJ\xd8\xd1<\xfcy\x96\x80\x19\xf9d\xe8',
-		"abKPld1EcMni": b'\xbeT\x9c\xe8F\xf4\x02{d\xc7\xa1\xeb-\x1aA\xc3~',
-		"kbjfrfpoJU": b'l\x99\xea\xa6\x07\xefE\xb3\t\xab\x01\x05\xa2\xd6\x199\x80',
-		"oycqAZloTNDm": b'\x95LQ@\x807\xaa?F\x11z\xf3s\x0e\x04_\x8f',
-    },
-	"root_disk_uuid": "FDB13F90-6FDA-3A57-BA48-CFF31478CAF2"
-}
+FAKE_DATA = plistlib.load(open("data.plist", "rb"))
 
 def load_binary() -> bytes:
     # Open the file at BINARY_PATH, check the hash, and return the binary
