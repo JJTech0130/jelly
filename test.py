@@ -85,6 +85,57 @@ def nac_init(j: Jelly, cert: bytes):
     validation_ctx_addr = int.from_bytes(validation_ctx_addr, 'little')
     return validation_ctx_addr, request
 
+def nac_submit(j: Jelly, validation_ctx: int, response: bytes):
+    response_addr = j.malloc(len(response))
+    j.uc.mem_write(response_addr, response)
+
+    ret = j.instr.call(
+        0xB1DD0,
+        [
+            validation_ctx,
+            response_addr,
+            len(response),
+        ],
+    )
+
+    if ret != 0:
+        n = ret & 0xffffffff
+        n = (n ^ 0x80000000) - 0x80000000
+        raise Exception(f"Error calling nac_submit: {n}")
+    
+def nac_generate(j: Jelly, validation_ctx: int):
+    #void *validation_ctx, void *unk_bytes, int unk_len,
+    #            void **validation_data, int *validation_data_len
+    
+    out_validation_data_addr = j.malloc(8)
+    out_validation_data_len_addr = j.malloc(8)
+
+    ret = j.instr.call(
+        0xB1DF0,
+        [
+            validation_ctx,
+            0,
+            0,
+            out_validation_data_addr,
+            out_validation_data_len_addr,
+        ],
+    )
+
+    if ret != 0:
+        n = ret & 0xffffffff
+        n = (n ^ 0x80000000) - 0x80000000
+        raise Exception(f"Error calling nac_generate: {n}")
+    
+    validation_data_addr = j.uc.mem_read(out_validation_data_addr, 8)
+    validation_data_len = j.uc.mem_read(out_validation_data_len_addr, 8)
+
+    validation_data_addr = int.from_bytes(validation_data_addr, 'little')
+    validation_data_len = int.from_bytes(validation_data_len, 'little')
+
+    validation_data = j.uc.mem_read(validation_data_addr, validation_data_len)
+
+    return validation_data
+
 
 def hook_code(uc, address: int, size: int, user_data):
     print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
@@ -290,9 +341,19 @@ def get_cert():
     resp = plistlib.loads(resp.content)
     return resp["cert"]
 
+def get_session_info(req: bytes) -> bytes:
+    body = {
+        'session-info-request': req,
+    }
+    body = plistlib.dumps(body)
+    resp = requests.post("https://identity.ess.apple.com/WebObjects/TDIdentityService.woa/wa/initializeValidation", data=body, verify=False)
+    resp = plistlib.loads(resp.content)
+    return resp["session-info"]
+
 def arc4random(j: Jelly) -> int:
     import random
-    return random.randint(0, 0xFFFFFFFF)
+    #return random.randint(0, 0xFFFFFFFF)
+    return 0
 
 def main():
     binary = load_binary()
@@ -348,6 +409,14 @@ def main():
     print(f"Validation Context: {hex(val_ctx)}")
     print(f"Request: {b64encode(req).decode()}")
 
+    session_info = get_session_info(req)
+    print(f"Session Info: {b64encode(session_info).decode()}")
+
+    nac_submit(j, val_ctx, session_info)
+
+    val_data = nac_generate(j, val_ctx)
+
+    print(f"Validation Data: {b64encode(val_data).decode()}")
 
 if __name__ == "__main__":
     main()
