@@ -129,6 +129,10 @@ def _parse_cfstr_ptr(j: Jelly, ptr: int) -> str:
     str_data = j.uc.mem_read(str_ptr, length)
     return str_data.decode("utf-8")
 
+def _parse_cstr_ptr(j: Jelly, ptr: int) -> str:
+    data = j.uc.mem_read(ptr, 256) # Lazy way to do it
+    return data.split(b"\x00")[0].decode("utf-8")
+
 def IORegistryEntryCreateCFProperty(j: Jelly, entry: int, key: int, allocator: int, options: int):
     key_str = _parse_cfstr_ptr(j, key)
     if key_str in FAKE_DATA["iokit"]:
@@ -176,8 +180,10 @@ def maybe_object_maybe_string(j: Jelly, obj: int):
     if isinstance(obj, str):
         return obj
     elif obj > len(CF_OBJECTS):
+        return obj
+        #raise Exception(f"WTF: {hex(obj)}")
         # This is probably a CFString
-        return _parse_cfstr_ptr(j, obj)
+       # return _parse_cfstr_ptr(j, obj)
     else:
         return CF_OBJECTS[obj - 1]
 
@@ -234,6 +240,47 @@ def CFStringGetCString(j: Jelly, string: int, buf: int, buf_len: int, encoding: 
     else:
         raise Exception("Unknown CF object type")
     
+def IOServiceMatching(j: Jelly, name: int) -> int:
+    # Read the raw c string pointed to by name
+    name = _parse_cstr_ptr(j, name)
+    print(f"IOServiceMatching: {name}")
+    # Create a CFString from the name
+    name = CFStringCreate(j, name)
+    # Create a dictionary
+    d = CFDictionaryCreateMutable(j)
+    # Set the key "IOProviderClass" to the name
+    CFDictionarySetValue(j, d, "IOProviderClass", name)
+    # Return the dictionary
+    return d
+    
+def IOServiceGetMatchingService(j: Jelly) -> int:
+    return 92
+
+ETH_ITERATOR_HACK = False
+def IOServiceGetMatchingServices(j: Jelly, port, match, existing) -> int:
+    global ETH_ITERATOR_HACK
+    ETH_ITERATOR_HACK = True
+    # Write 93 to existing
+    j.uc.mem_write(existing, bytes([93]))
+    return 0
+
+def IOIteratorNext(j: Jelly, iterator: int) -> int:
+    global ETH_ITERATOR_HACK
+    if ETH_ITERATOR_HACK:
+        ETH_ITERATOR_HACK = False
+        return 94
+    else:
+        return 0
+    
+def bzero(j: Jelly, ptr: int, len: int):
+    j.uc.mem_write(ptr, bytes([0]) * len)
+    return 0
+
+def IORegistryEntryGetParentEntry(j: Jelly, entry: int, _, parent: int) -> int:
+    j.uc.mem_write(parent, bytes([entry + 100]))
+    return 0
+
+
 def main():
     binary = load_binary()
     binary = get_x64_slice(binary)
@@ -267,10 +314,21 @@ def main():
         "_CFStringGetMaximumSizeForEncoding": lambda _, length, __: length,
         "_CFStringGetCString": CFStringGetCString,
         "_free": lambda _: 0,
+        "_IOServiceMatching": IOServiceMatching,
+        "_IOServiceGetMatchingService": IOServiceGetMatchingService,
+        "_CFDictionaryCreateMutable": CFDictionaryCreateMutable,
+        "_kCFBooleanTrue": lambda: 0,
+        "_CFDictionarySetValue": CFDictionarySetValue,
+        "_IOServiceGetMatchingServices": IOServiceGetMatchingServices,
+        "_IOIteratorNext": IOIteratorNext,
+        "___bzero": bzero,
+        "_IORegistryEntryGetParentEntry": IORegistryEntryGetParentEntry,
+
+
 
     }
     j.setup(hooks)
-    j.uc.hook_add(unicorn.UC_HOOK_CODE, hook_code)
+    #j.uc.hook_add(unicorn.UC_HOOK_CODE, hook_code)
     nac_init(j, b"Hello, world!")
 
 
