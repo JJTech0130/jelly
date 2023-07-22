@@ -195,7 +195,7 @@ class Jelly:
     def _do_bind(self, mu: unicorn.Uc, type, location, name):
         if type == 1: # BIND_TYPE_POINTER
             if name in self._hooks:
-                print(f"Hooking {name} at {hex(location)}")
+                #print(f"Hooking {name} at {hex(location)}")
                 mu.mem_write(location, self._resolved_hooks[name].to_bytes(8, byteorder='little'))
             else:
                 #print(f"Unknown symbol {name}")

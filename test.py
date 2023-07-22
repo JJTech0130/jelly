@@ -152,7 +152,7 @@ def hook_code(uc, address: int, size: int, user_data):
 def malloc(j: Jelly, len: int) -> int:
     # Hook malloc
     # Return the address of the allocated memory
-    print("malloc hook called with len = %d" % len)
+    #print("malloc hook called with len = %d" % len)
     return j.malloc(len)
 
 

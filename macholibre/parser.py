@@ -159,7 +159,7 @@ class Parser():
         old = self.__file.tell()
 
         self.__file.seek(m_offset + offset)
-        print("seeking to: " + str(m_offset + offset))
+        #print("seeking to: " + str(m_offset + offset))
 
         entropy = self.calc_entropy(self.__file.read(size))
 
@@ -1727,7 +1727,7 @@ class Parser():
 
             cputype = dictionary.cputypes[cputype][-2]
 
-            print(f"CPU TYPE: {cputype} SUBTYPE: {subtype}")
+            #print(f"CPU TYPE: {cputype} SUBTYPE: {subtype}")
 
             self.__file.seek(old)
             if i == uni_index or cpu_type == cputype:
